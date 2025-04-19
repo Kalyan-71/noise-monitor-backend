@@ -15,7 +15,7 @@ const NoiseStatus = () => {
     // Fetch noise data every second
     const fetchNoise = async () => {
       try {
-        const res = await axios.get("http://localhost:5000/api/noise/latest");
+        const res = await axios.get("https://noise-backend.onrender.com/api/noise/latest");
         setDb(parseInt(res.data.value)); // Set the fetched noise value
       } catch (err) {
         console.error("Error fetching:", err);

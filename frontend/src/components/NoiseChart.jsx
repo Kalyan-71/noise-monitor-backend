@@ -23,7 +23,7 @@ const NoiseChart = () => {
 
   const fetchNoise = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/api/noise/latest");
+      const res = await axios.get("https://noise-backend.onrender.com/api/noise/latest");
       const dB = parseInt(res.data.value); // Get the noise value from response
 
       // Update labels (time-based)
