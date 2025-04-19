@@ -13,7 +13,10 @@ app.use(express.json());
 // Routes
 const noiseRoutes = require("./routes/noiseRoutes");
 app.use("/api", noiseRoutes);
-
+mongoose.connect(process.env.MONGO_URL, {
+    dbName: "noise-monitor"
+  });
+  
 // Connect DB & Start Server
 mongoose
   .connect(process.env.MONGO_URL, { useNewUrlParser: true, useUnifiedTopology: true })
