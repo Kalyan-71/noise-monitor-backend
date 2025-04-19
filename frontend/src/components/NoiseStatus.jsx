@@ -23,7 +23,7 @@ const NoiseStatus = () => {
     };
 
     // Fetch data every 1 second
-    const interval = setInterval(fetchNoise, 1000);
+    const interval = setInterval(fetchNoise, 2000);
     return () => clearInterval(interval); // Cleanup interval on unmount
   }, []);
 

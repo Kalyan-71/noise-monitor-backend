@@ -48,7 +48,7 @@ const NoiseChart = () => {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const interval = setInterval(fetchNoise, 1000); // Fetch data every 1 second
+    const interval = setInterval(fetchNoise, 2000); // Fetch data every 2 second
     return () => clearInterval(interval); // Cleanup interval on unmount
   }, []);
 
