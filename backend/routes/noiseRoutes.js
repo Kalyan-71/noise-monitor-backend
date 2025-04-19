@@ -1,8 +1,8 @@
-// routes/noiseRoutes.js
 const express = require("express");
 const router = express.Router();
 const Noise = require("../models/NoiseChunk"); // your updated model
 
+// POST endpoint to store noise reading
 router.post("/", async (req, res) => {
   try {
     const { value } = req.body;
@@ -46,6 +46,29 @@ router.post("/", async (req, res) => {
     res.status(200).json({ message: "Noise reading stored successfully", doc });
   } catch (error) {
     console.error("Error saving noise reading:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET endpoint to retrieve the latest noise reading
+router.get("/latest", async (req, res) => {
+  try {
+    // Get the latest document from the Noise collection
+    const latestNoise = await Noise.findOne()
+      .sort({ "readings.time": -1 }) // Sort by the most recent reading
+      .select("readings") // Select the readings array
+      .limit(1); // Get only the most recent reading
+
+    if (!latestNoise || !latestNoise.readings || latestNoise.readings.length === 0) {
+      return res.status(404).json({ error: "No noise readings found" });
+    }
+
+    // Get the latest reading from the array
+    const latestReading = latestNoise.readings[latestNoise.readings.length - 1];
+
+    res.status(200).json({ value: latestReading.value, time: latestReading.time });
+  } catch (error) {
+    console.error("Error fetching latest noise reading:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
