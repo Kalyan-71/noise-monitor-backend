@@ -3,13 +3,17 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 require("dotenv").config();
 
+
+
 const noiseRoutes = require("./routes/noiseRoutes");
+// const analysisRoutes = require('./routes/analysisRoutes');
 
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+// app.use('/api/analysis', analysisRoutes);
 
 // Routes
 app.use("/api/noise", noiseRoutes);

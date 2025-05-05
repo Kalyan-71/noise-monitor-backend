@@ -17,8 +17,12 @@ const NoiseStatus = () => {
       try {
         const res = await axios.get("https://noise-backend.onrender.com/api/noise/latest");
         setDb(parseInt(res.data.value)); // Set the fetched noise value
+        const dBValue = parseInt(res.data.value);
+        if (dBValue >= 30) {
+          await axios.post("https://noise-backend.onrender.com/api/notify", { value: dBValue });
+        }
       } catch (err) {
-        console.error("Error fetching:", err);
+        console.error("Error fetching: or notifying", err);
       }
     };
 

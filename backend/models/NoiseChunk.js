@@ -19,6 +19,10 @@ const chunkSchema = new mongoose.Schema({
     type: String,
     default: "Default"
   },
+  week: {
+    type: String // Format: "2025-W18"
+  },
+
   readings: [readingSchema],
   avg: Number,
   peak: Number,
