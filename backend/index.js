@@ -1,19 +1,23 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const cookieParser = require('cookie-parser');
 require("dotenv").config();
 
-
-
 const noiseRoutes = require("./routes/noiseRoutes");
-// const analysisRoutes = require('./routes/analysisRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
 // Middleware
-app.use(cors());
+// app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:3000', // your React frontend origin
+  credentials: true
+}));
 app.use(express.json());
-// app.use('/api/analysis', analysisRoutes);
+app.use(cookieParser());
+app.use('/api/auth', authRoutes);
 
 // Routes
 app.use("/api/noise", noiseRoutes);

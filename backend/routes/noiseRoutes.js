@@ -5,13 +5,14 @@ const moment = require("moment");
 
 router.post("/", async (req, res) => {
   try {
-    const { value } = req.body;
+    // const { value } = req.body;
+    const { value, location = 'Default' } = req.body; // Default to 'Default' if location is not provided
 
     if (value === undefined) {
       return res.status(400).json({ error: "Missing 'value' in request body" });
     }
 
-    const location = "Default"; // Capitalized to match your example
+    // const location = "Default"; // Capitalized to match your example
 
     const now = new Date();
     const istOffset = 5.5 * 60 * 60 * 1000;
@@ -19,23 +20,21 @@ router.post("/", async (req, res) => {
     
     const dateStr = istDate.toISOString().slice(0, 10); // "YYYY-MM-DD"
     const hour = istDate.getHours(); // 0–23
-    // const timeStr = moment(istDate).format("HH:mm:ss"); // "12:00:00"
+    
     const isDay = hour >= 6 && hour < 18; // 6 AM to 6 PM is "day"
 
-    // const weekStr = moment(istDate).format('GGGG-[W]WW'); // e.g., "2025-W18"
+    const weekStr = moment(istDate).format('GGGG-[W]WW'); // e.g., "2025-W18"
 
-    const weekStr = `${istDate.getFullYear()}-W${Math.ceil(
-            (istDate.getDate() - 1 + istDate.getDay()) / 7
-          )}`; // ISO-style week string
+
 
      const time = istDate.toISOString();
     // Step 1: Push new reading
     await NoiseChunk.findOneAndUpdate(
-      { date: dateStr, location },
+      { date: dateStr,hour, location },
       {
         $push: {
           readings: {
-            // time: timeStr,
+            
             time,
             value,
             isDay,
@@ -47,13 +46,11 @@ router.post("/", async (req, res) => {
           week: weekStr,
           location,
         },
-        // $setOnInsert: {
-        //             location,
-        //             week: weekStr,
-        //           },
+        
       },
       { upsert: true, new: true }
     );
+    
 
     // Step 2: Fetch updated document for recalculating stats
     const updatedDoc = await NoiseChunk.findOne({ date: dateStr, location });
@@ -85,16 +82,18 @@ router.post("/", async (req, res) => {
 // GET endpoint to retrieve the latest noise reading
 router.get("/latest", async (req, res) => {
   try {
-    const latestNoise = await NoiseChunk.findOne()
-      .sort({ "readings.time": -1 }) // Sort by the most recent reading
-      .select("readings") // Select the readings array
-      .limit(1); // Get only the most recent reading
+    const latestNoise = await NoiseChunk.aggregate([
+      { $unwind: "$readings" },
+      { $sort: { "readings.time": -1 } },
+      { $limit: 1 },
+      { $project: { value: "$readings.value", time: "$readings.time" } }
+    ]);
 
-    if (!latestNoise || !latestNoise.readings || latestNoise.readings.length === 0) {
+    if (!latestNoise || latestNoise.length === 0) {
       return res.status(404).json({ error: "No noise readings found" });
     }
 
-    const latestReading = latestNoise.readings[latestNoise.readings.length - 1];
+    const latestReading = latestNoise[0]; // Use the first result
 
     res.status(200).json({ value: latestReading.value, time: latestReading.time });
   } catch (error) {
@@ -104,161 +103,104 @@ router.get("/latest", async (req, res) => {
 });
 
 
-// GET /analysis/daily - Daily noise analysis
-router.get("/analysis/daily", async (req, res) => {
+// GET /api/noise/:timeRange?zone=Default
+router.get('/:timeRange', async (req, res) => {
   try {
-    const { date } = req.query;
+    const { timeRange } = req.params;
+    const zone = req.query.zone || 'Default';
 
-    if (!date) {
-      return res.status(400).json({ error: "Missing 'date' query parameter" });
+    const now = moment().utcOffset("+05:30"); // India time
+
+    let matchQuery = { location: zone };
+
+    if (timeRange === 'daily') {
+      const today = now.format('YYYY-MM-DD');
+      matchQuery.date = today;
+    } else if (timeRange === 'weekly') {
+      const weekStr = now.format('GGGG-[W]WW'); // e.g., "2025-W18"
+      matchQuery.week = weekStr;
+    } else if (timeRange === 'monthly') {
+      const month = now.format('YYYY-MM'); // e.g., "2025-05"
+      matchQuery.date = { $regex: `^${month}` };
+    } else {
+      return res.status(400).json({ error: 'Invalid timeRange' });
     }
 
-    const chunks = await NoiseChunk.find({ date }).sort({ hour: 1 });
+    const chunks = await NoiseChunk.find(matchQuery).sort({ hour: 1 });
 
-    if (!chunks.length) {
-      return res.status(404).json({ error: "No data found for the given date" });
-    }
+    const data = [];
+    let totalAvgSum = 0;
+    let totalDangerSpikes = 0;
+    let totalSafePercent = 0;
+    let maxLongestSpike = 0;
 
-    const hourlyData = [];
-    let total = 0;
-    let count = 0;
-    let max = -Infinity;
-    let min = Infinity;
-    let dangerSpikes = 0;
-    let totalReadings = 0;
-    let safeCount = 0;
+    for (const chunk of chunks) {
+      const readings = chunk.readings;
+      const values = readings.map((r) => r.value);
 
-    chunks.forEach(chunk => {
-      const { hour, avg, peak, low, readings } = chunk;
-      hourlyData.push({ hour, avg, peak, low });
+      const avg = parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(2));
+      const peak = Math.max(...values);
+      const low = Math.min(...values);
 
-      total += avg;
-      count++;
-      if (peak > max) max = peak;
-      if (low < min) min = low;
+      const dangerSpikes = readings.filter(r => r.value > 85).length;
 
-      readings.forEach(r => {
-        totalReadings++;
-        if (r.value > 85) dangerSpikes++;
-        if (r.value < 70) safeCount++;
+      let longestSpike = 0;
+      let currentSpike = 0;
+      readings.forEach((r) => {
+        if (r.value > 85) {
+          currentSpike++;
+          longestSpike = Math.max(longestSpike, currentSpike);
+        } else {
+          currentSpike = 0;
+        }
       });
-    });
 
-    const avgDay = total / count;
-    const safePercent = ((safeCount / totalReadings) * 100).toFixed(2);
+      const safeTime = readings.filter(r => r.value < 60).length;
+      const safeTimePercent = (safeTime / readings.length) * 100;
 
-    res.json({
-      date,
-      hourlyData,
-      summary: {
-        average: avgDay.toFixed(2),
-        peak: max,
-        low: min,
+      // Accumulate summary stats
+      totalAvgSum += avg;
+      totalDangerSpikes += dangerSpikes;
+      totalSafePercent += safeTimePercent;
+      maxLongestSpike = Math.max(maxLongestSpike, longestSpike);
+
+      data.push({
+        hour: chunk.hour,
+        avg,
+        peak,
+        low,
         dangerSpikes,
-        safePercent,
-      },
+        longestSpike,
+        safeTimePercent,
+        date: chunk.date,
+      });
+    }
+
+    const totalChunks = data.length || 1; // avoid divide-by-zero
+    const summaryStats = {
+      avgDb: parseFloat((totalAvgSum / totalChunks).toFixed(2)),
+      dangerSpikes: totalDangerSpikes,
+      longestSpikeMin: maxLongestSpike,
+      safePercentage: parseFloat((totalSafePercent / totalChunks).toFixed(1)),
+    };
+
+    return res.status(200).json({
+      timeRange,
+      zone,
+      data,
+      summaryStats,
     });
+
   } catch (err) {
-    console.error("Daily analysis error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    console.error('Error in analysis endpoint:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET /analysis/weekly - Weekly noise analysis
-router.get("/analysis/weekly", async (req, res) => {
-  try {
-    const { week } = req.query;
 
-    if (!week) {
-      return res.status(400).json({ error: "Missing 'week' query parameter (e.g., 2025-W18)" });
-    }
 
-    const chunks = await NoiseChunk.find({ week });
 
-    if (!chunks || chunks.length === 0) {
-      return res.status(404).json({ error: "No noise data found for the specified week." });
-    }
 
-    const dailyStats = {};
-    for (const chunk of chunks) {
-      if (!dailyStats[chunk.date]) {
-        dailyStats[chunk.date] = {
-          totalReadings: 0,
-          readingCount: 0,
-          max: -Infinity,
-          min: Infinity,
-        };
-      }
-
-      dailyStats[chunk.date].totalReadings += chunk.readings.reduce((sum, r) => sum + r.value, 0);
-      dailyStats[chunk.date].readingCount += chunk.readings.length;
-      dailyStats[chunk.date].max = Math.max(dailyStats[chunk.date].max, chunk.peak || 0);
-      dailyStats[chunk.date].min = Math.min(dailyStats[chunk.date].min, chunk.low || Infinity);
-    }
-
-    const summary = Object.entries(dailyStats).map(([date, stats]) => ({
-      date,
-      average: stats.readingCount ? stats.totalReadings / stats.readingCount : 0,
-      peak: stats.max,
-      low: stats.min,
-    }));
-
-    res.json({ week, summary });
-  } catch (error) {
-    console.error("Error in weekly analysis route:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// GET /analysis/monthly - Monthly noise analysis
-router.get("/analysis/monthly", async (req, res) => {
-  try {
-    const { month } = req.query; // Expected format: "YYYY-MM"
-
-    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
-      return res.status(400).json({ error: "Missing or invalid 'month' query (expected YYYY-MM)" });
-    }
-
-    const chunks = await NoiseChunk.find({
-      date: { $regex: `^${month}` },
-    });
-
-    if (!chunks || chunks.length === 0) {
-      return res.status(404).json({ error: "No noise data found for the specified month." });
-    }
-
-    const weeklyStats = {};
-    for (const chunk of chunks) {
-      const week = chunk.week || "Unknown";
-
-      if (!weeklyStats[week]) {
-        weeklyStats[week] = {
-          totalReadings: 0,
-          readingCount: 0,
-          max: -Infinity,
-          min: Infinity,
-        };
-      }
-
-      weeklyStats[week].totalReadings += chunk.readings.reduce((sum, r) => sum + r.value, 0);
-      weeklyStats[week].readingCount += chunk.readings.length;
-      weeklyStats[week].max = Math.max(weeklyStats[week].max, chunk.peak || 0);
-      weeklyStats[week].min = Math.min(weeklyStats[week].min, chunk.low || Infinity);
-    }
-
-    const summary = Object.entries(weeklyStats).map(([week, stats]) => ({
-      week,
-      average: stats.readingCount ? stats.totalReadings / stats.readingCount : 0,
-      peak: stats.max,
-      low: stats.min,
-    }));
-
-    res.json({ month, summary });
-  } catch (error) {
-    console.error("Error in monthly analysis route:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
 
 module.exports = router;
 
