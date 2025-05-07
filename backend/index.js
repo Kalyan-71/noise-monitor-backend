@@ -12,7 +12,8 @@ const app = express();
 // Middleware
 // app.use(cors());
 app.use(cors({
-  origin: 'http://localhost:3000', // your React frontend origin
+  // origin: 'http://localhost:3000', // your React frontend origin
+  origin: 'https://noise-monitor-frontend.onrender.com',
   credentials: true
 }));
 app.use(express.json());
